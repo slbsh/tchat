@@ -1,0 +1,19 @@
+[package]
+name = "tchat"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+twitch-irc = "5.0.0" 
+tokio = {version = "1.21.2", features = ["rt-multi-thread", "macros"]}
+ansi_term = "0.12.1"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+codegen-units = 1
+strip = true 
+debug = false 
+panic = 'abort'
