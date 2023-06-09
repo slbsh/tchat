@@ -9,6 +9,8 @@ edition = "2021"
 twitch-irc = "5.0.0" 
 tokio = {version = "1.21.2", features = ["rt-multi-thread", "macros"]}
 ansi_term = "0.12.1"
+lazy_static = "1.4.0"
+async-trait = "0.1.68"
 
 [profile.release]
 opt-level = 'z'
