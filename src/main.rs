@@ -40,11 +40,7 @@ impl ColorStr for String {
         let minify = MINIFY_FLAG.lock().await;
         if *minify { text = alt_text; }
 
-        let mut res = format!("{}{}", &self, RGB(r, g, b).bold().paint(text));
-
-        if *minify { res.insert_str(0, "|"); }
-
-        res
+        format!("{}{}", &self, RGB(r, g, b).bold().paint(text))
     }
 }
 
@@ -111,35 +107,32 @@ async fn main() {
                     .map(|badge| badge.name.to_string())
                     .collect();
 
-                // FIXME this is (still) a mess...
+                // TODO Decide if to keep or remove the commented lines
                 // append different coloured strings based on which badge this is
                 let mut badges_print: String = "".to_string();
                 for badge in badges {
                     badges_print = match badge.as_ref() {
-                        "broadcaster" => badges_print.colourize("|owner|","o", 233, 25, 22).await,
+                        "broadcaster" => badges_print.colourize("|ttv|","t", 233, 25, 22).await,
                         "moderator" => badges_print.colourize("|mod|","m", 00, 173, 03).await,
                         "vip" => badges_print.colourize("|vip|", "v", 224, 05, 185).await,
                         "subscriber" => badges_print.colourize("|sub|", "s", 130, 05, 180).await,
-                        "founder" => badges_print.colourize("|1st|", "1s", 170, 64, 213).await,
-                        "no_audio" => badges_print.colourize("|mute|", "/a", 50, 50, 57).await,
-                        "no_video" => badges_print.colourize("|blind|", "/v", 50, 50, 57).await,
-                        "game-developer" => badges_print.colourize("|dev|", "d", 50, 50, 57).await,
+                        "founder" => badges_print.colourize("|1st|", "s", 170, 64, 213).await,
+                        // "no_audio" => badges_print.colourize("|mute|", "/a", 50, 50, 57).await,
+                        // "no_video" => badges_print.colourize("|blind|", "/v", 50, 50, 57).await,
+                        // "game-developer" => badges_print.colourize("|dev|", "d", 50, 50, 57).await,
                         "bits" => badges_print.colourize("|bit|", "b", 193, 178, 17).await,
-                        "prime_gaming" | "sub-gifter" | "premium" | "superultracombo-2023" 
-                            | "bits-charity" => badges_print, //ignore
-                        &_ => {
-                            format!("{}|{}|", badges_print, badge) // no colour if unknown
-                        },
+                        &_ => badges_print, // no colour if unknown
                     }
                 }
-                // read the minify flag
+                // read minify flag
                 let minify = MINIFY_FLAG.lock().await;
 
                 // add space to separate from username if there is at least one badge
                 // and minify isn't on
-                if !badges_print.is_empty() && !*minify { badges_print.push_str(" "); }
-                // add a separator if it doesnt end with one
-                if *minify && !badges_print.is_empty() { badges_print.push_str("|"); }
+                if !badges_print.is_empty() && !*minify { badges_print.push(' '); }
+
+                // if minify is on then use a pipe instead of a space
+                if !badges_print.is_empty() && *minify { badges_print.push('|'); }
 
                 // print em all to terminal!
                 println!("{}{}: {}", badges_print, name_coloured, msg.message_text);
