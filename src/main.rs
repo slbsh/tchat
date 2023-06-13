@@ -3,7 +3,6 @@ use twitch_irc::ClientConfig;
 use twitch_irc::SecureTCPTransport;
 use twitch_irc::TwitchIRCClient;
 use twitch_irc::message::{ServerMessage, RGBColor};
-use twitch_irc::validate::validate_login;
 
 use std::process::exit;
 use ansi_term::Colour::RGB;
@@ -65,8 +64,9 @@ async fn parse_args() -> String {
 
     // check if we want to minify
     if arg.contains(&"-m".to_owned()) || arg.contains(&"--mini".to_owned()) {
-        arg.retain(|s| s != "-m");
-        arg.retain(|s| s != "-mini");
+        // remove the arg given that we already parsed it
+        arg.retain(|s| s != "-m" || s != "--mini");
+        // set the flag
         let mut minify = MINIFY_FLAG.lock().await;
         *minify = true;
     }
@@ -140,14 +140,11 @@ async fn main() {
         }
     });
 
-    // check if the username is valid
-    validate_login(&arg).unwrap_or_else(|_| {
+    // join that channel's twitch chat
+    client.join(arg).unwrap_or_else(|_| {
         eprintln!("Invalid Username Provided!");
         exit(2);
     });
-
-    // join that channel's twitch chat
-    client.join(arg).expect("Failed to Join given Channel!");
     
     // await messages
     join_handle.await.expect("Failed to Handle Message");
