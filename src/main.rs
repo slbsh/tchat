@@ -6,9 +6,6 @@ use twitch_irc::message::{ServerMessage, RGBColor};
 
 use std::process::exit;
 use ansi_term::Colour::RGB;
-use tokio::sync::Mutex;
-use lazy_static::lazy_static;
-use async_trait::async_trait;
 
 static HELP_MESSAGE: &str =
 "tchat - Monitor any Twitch Chat on the Terminal
@@ -18,32 +15,27 @@ Usage:
    -h, --help`    Show this Message
    -m, --mini     Use the minified badge display";
 
-// initialize the minify flag
-lazy_static! {
-    static ref MINIFY_FLAG: Mutex<bool> = Mutex::new(false);
-}
-
-#[async_trait]
 trait ColorStr {
-    async fn colourize(&self, text: &str, alt_text: &str, r: u8, g: u8, b: u8) -> String;
+    fn colourize(&self, mini: bool, text: &str, alt_text: &str, r: u8, g: u8, b: u8) -> String;
 }
 
 // create a method for String for appending coloured text
-#[async_trait]
 impl ColorStr for String {
-    async fn colourize(&self, text: &str, alt_text: &str, r: u8, g: u8, b: u8) -> String {
-        // reassign the value as mutable
-        let mut text: &str = text;
+    fn colourize(&self, mini: bool, text: &str, alt_text: &str, r: u8, g: u8, b: u8) -> String {
+        let res: String;
 
-        // handle the minify flag
-        let minify = MINIFY_FLAG.lock().await;
-        if *minify { text = alt_text; }
+        // handle the minify flag, choosing the appropriate version
+        if mini { 
+            res = format!("{}{}", &self, RGB(r, g, b).bold().paint(alt_text));
+        } else {
+            res = format!("{}{}", &self, RGB(r, g, b).bold().paint(text));
+        }
 
-        format!("{}{}", &self, RGB(r, g, b).bold().paint(text))
+        res
     }
 }
 
-async fn parse_args() -> String {
+async fn parse_args() -> (String, bool) {
     let mut arg: Vec<String> = std::env::args().skip(1).collect();
 
     // return if no args are given
@@ -61,14 +53,15 @@ async fn parse_args() -> String {
         eprintln!("0.2.0");
         exit(0);
     }
+    
+    let mut minify = false;
 
     // check if we want to minify
     if arg.contains(&"-m".to_owned()) || arg.contains(&"--mini".to_owned()) {
         // remove the arg given that we already parsed it
         arg.retain(|s| s != "-m" || s != "--mini");
         // set the flag
-        let mut minify = MINIFY_FLAG.lock().await;
-        *minify = true;
+        minify = true;
     }
 
     // parse user into &str
@@ -77,7 +70,7 @@ async fn parse_args() -> String {
         exit(2);
     });
 
-    user.to_lowercase()
+    (user.to_lowercase(), minify)
 }
 
 #[tokio::main]
@@ -107,32 +100,25 @@ async fn main() {
                     .map(|badge| badge.name.to_string())
                     .collect();
 
-                // TODO Decide if to keep or remove the commented lines
                 // append different coloured strings based on which badge this is
                 let mut badges_print: String = "".to_string();
                 for badge in badges {
                     badges_print = match badge.as_ref() {
-                        "broadcaster" => badges_print.colourize("|ttv|","t", 233, 25, 22).await,
-                        "moderator" => badges_print.colourize("|mod|","m", 00, 173, 03).await,
-                        "vip" => badges_print.colourize("|vip|", "v", 224, 05, 185).await,
-                        "subscriber" => badges_print.colourize("|sub|", "s", 130, 05, 180).await,
-                        "founder" => badges_print.colourize("|1st|", "s", 170, 64, 213).await,
-                        // "no_audio" => badges_print.colourize("|mute|", "/a", 50, 50, 57).await,
-                        // "no_video" => badges_print.colourize("|blind|", "/v", 50, 50, 57).await,
-                        // "game-developer" => badges_print.colourize("|dev|", "d", 50, 50, 57).await,
-                        "bits" => badges_print.colourize("|bit|", "b", 193, 178, 17).await,
+                        "broadcaster" => badges_print.colourize(arg.1, "|ttv|","t", 233, 25, 22),
+                        "moderator" => badges_print.colourize(arg.1, "|mod|","m", 00, 173, 03),
+                        "vip" => badges_print.colourize(arg.1, "|vip|", "v", 224, 05, 185),
+                        "subscriber" => badges_print.colourize(arg.1, "|sub|", "s", 130, 05, 180),
+                        "founder" => badges_print.colourize(arg.1, "|1st|", "s", 170, 64, 213),
+                        "bits" => badges_print.colourize(arg.1, "|bit|", "b", 193, 178, 17),
                         &_ => badges_print, // no colour if unknown
                     }
                 }
-                // read minify flag
-                let minify = MINIFY_FLAG.lock().await;
-
                 // add space to separate from username if there is at least one badge
                 // and minify isn't on
-                if !badges_print.is_empty() && !*minify { badges_print.push(' '); }
+                if !badges_print.is_empty() && arg.1 { badges_print.push(' '); }
 
                 // if minify is on then use a pipe instead of a space
-                if !badges_print.is_empty() && *minify { badges_print.push('|'); }
+                if !badges_print.is_empty() && arg.1 { badges_print.push('|'); }
 
                 // print em all to terminal!
                 println!("{}{}: {}", badges_print, name_coloured, msg.message_text);
@@ -141,7 +127,7 @@ async fn main() {
     });
 
     // join that channel's twitch chat
-    client.join(arg).unwrap_or_else(|_| {
+    client.join(arg.0).unwrap_or_else(|_| {
         eprintln!("Invalid Username Provided!");
         exit(2);
     });
