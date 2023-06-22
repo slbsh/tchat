@@ -1,11 +1,11 @@
 **tchat** - Monitor a Twitch Chat from the Terminal  
 
-- Supports Badges and Name Colours  
+- Colours names based on the user's badges 
 - No need for an Access Token, it only reads the chat
 - Lightweight and (hopefully) Performant
 
 # Installation
-make sure ye have the Rust toolchain installed  
+make sure ye have the Rust toolchain installed, then:
 ``make build`` or ``make install``  
 
 # Donate?
@@ -24,7 +24,4 @@ This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <http://www.gnu.org/licenses/>.
 ```
