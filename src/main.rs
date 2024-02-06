@@ -23,7 +23,7 @@ struct Args {
     ignore:  Vec<&'static str>,
 }
 
-const USAGE: &str = "Usage: tchat [-bBcCdFhoqtTV] [-f file] [username ...]";
+const USAGE: &str = "Usage: tchat [-bBcCdFhoqtTV] [-f file] [-i username] [username ...]";
 const ERR_MESSAGE: &str = "Try the `-h` flag for more info.";
 const HELP_MESSAGE: &str =
 "\x1b[1mDESCRIPTION\x1b[0m
