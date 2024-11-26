@@ -3,25 +3,28 @@ use twitch_irc::SecureTCPTransport;
 use twitch_irc::TwitchIRCClient;
 use twitch_irc::message::ServerMessage;
 
-use std::process::exit;
 use ansi_term::Colour::{RGB, self};
+
+use std::sync::Arc;
+use std::process::exit;
 
 #[derive(Default, Debug)]
 struct Args {
-    colour:  bool,
-    bcolour: bool,
-    badge:   bool,
-    mbadge:  bool,
-    fbadge:  bool,
-    bits:    bool,
-    origin:  bool,
-    time:    bool,
-    file:    Option<&'static str>,
-    debug:   bool,
-    quiet:   bool,
-    names:   Vec<String>,
-    ignore:  Vec<&'static str>,
+	flags:   u16,
+	file:    Option<&'static str>,
+	names:   Vec<&'static str>,
+	ignore:  Vec<&'static str>,
 }
+
+const COLOUR:  u16 = 1 << 0;
+const BCOLOUR: u16 = 1 << 1;
+const BADGE:   u16 = 1 << 2;
+const MBADGE:  u16 = 1 << 3;
+const FBADGE:  u16 = 1 << 4;
+const BITS:    u16 = 1 << 5;
+const ORIGIN:  u16 = 1 << 6;
+const TIME:    u16 = 1 << 7;
+const QUIET:   u16 = 1 << 8;
 
 const USAGE: &str = "Usage: tchat [-bBcCdFhoqtTV] [-f file] [-i username] [username ...]";
 const ERR_MESSAGE: &str = "Try the `-h` flag for more info.";
@@ -31,8 +34,8 @@ const HELP_MESSAGE: &str =
     Whenever multiple usernames are specified both of the chats will be monitored simultaneously.
 
     All of the colour options work properly only within \x1b[4mtruecolor\x1b[0m terminals.
-    
-\x1b[1mOPTIONS\x1b[0m
+
+    \x1b[1mOPTIONS\x1b[0m
     -V  print current program version
     -h  print this message
 
@@ -51,215 +54,54 @@ const HELP_MESSAGE: &str =
     -q  dont print messages to stdout
 
     -f FILE 
-        log the output to FILE with ansi escape codes striped. 
-        This will append if the FILE already exists, and create one if not.
+    log the output to FILE with ansi escape codes striped. 
+    This will append if the FILE already exists, and create one if not.
 
     -i USERNAME
-        dont display chat messages coming from USERNAME.
-        This option may be repeated to filter multiple users.
-";
+    dont display chat messages coming from USERNAME.
+    This option may be repeated to filter multiple users.\n";
 
-fn parse_args(args: Vec<String>) -> Args {
-    let mut out = Args::default();
-    let mut args = args.into_iter();
+fn parse_args<I: std::iter::Iterator<Item = String>>(mut args: I) -> Args {
+	let mut out = Args::default();
 
-    while let Some(arg) = args.next() {
-        if let Some(arg) = arg.strip_prefix('-') {
-            for c in arg.chars() {
-                match c {
-                    'h' => {
-                        println!("{}\n\n{}", USAGE, HELP_MESSAGE);
-                        exit(0);
-                    },
+	while let Some(arg) = args.next() {
+		arg.strip_prefix('-').map(|c| c.chars().for_each(|c| match c {
+			'h' => {
+				println!("{}\n\n{}", USAGE, HELP_MESSAGE);
+				exit(0);
+			},
 
-                    'V' => {
-                        println!("{}", env!("CARGO_PKG_VERSION"));
-                        exit(0);
-                    },
+			'V' => {
+				println!("{}", env!("CARGO_PKG_VERSION"));
+				exit(0);
+			},
 
-                    /* colour usernames based on twitch assigned colours */
-                    'c' => out.colour = true,
-                    /* colour the usernames based on badges*/
-                    'C' => out.bcolour = true,
+			'c' => out.flags |= COLOUR,
+			'C' => out.flags |= BCOLOUR,
+			'b' => out.flags |= BADGE,
+			'B' => out.flags |= MBADGE,
+			'F' => out.flags |= FBADGE,
+			't' => out.flags |= BITS,
+			'o' => out.flags |= ORIGIN,
+			'T' => out.flags |= TIME,
+			'q' => out.flags |= QUIET,
 
-                    /* display badges */
-                    'b' => out.badge = true,
-                    /* display badges with the minified display */
-                    'B' => out.mbadge = true,
-                    /* display the full badge names */
-                    'F' => out.fbadge = true,
+			'f' => out.file = match args.next() {
+				Some(a) => Some(Box::leak(a.clone().into_boxed_str())),
+				None    => panic!("Missing argument after `-f`\n {}\n{}", USAGE, ERR_MESSAGE),
+			},
 
-                    /* show bits donations*/
-                    't' => out.bits = true,
+			'i' => out.ignore.push(match args.next() {
+				Some(a) => Box::leak(a.clone().into_boxed_str()),
+				None    => panic!("Missing argument after `-i`\n {}\n{}", USAGE, ERR_MESSAGE),
+			}),
 
-                    /* display the chat that the message was sent in */
-                    'o' => out.origin = true,
-
-                    /* display the current time of the message */
-                    'T' => out.time = true,
-
-                    /* log to file */
-                    'f' => out.file = match args.next() {
-                        Some(a) => Some(Box::leak(a.clone().into_boxed_str())),
-                        None => {
-                            println!("Missing argument after `-f`\n {}\n{}", USAGE, ERR_MESSAGE);
-                            exit(1);
-                        },
-                    },
-
-                    /* ignore certain usernames (this can be repeated so we use a Vec<>) */ 
-                    'i' => out.ignore.push(match args.next() {
-                        Some(a) => Box::leak(a.clone().into_boxed_str()),
-                        None => {
-                            println!("Missing argument after `-i`\n {}\n{}", USAGE, ERR_MESSAGE);
-                            exit(1);
-                        },
-                    }),
-
-                    /* debug log */
-                    'd' => out.debug = true,
-
-                    /* dont print stdout */
-                    'q' => out.quiet = true,
-
-                    _ => {
-                        println!("{}\n{}", USAGE, ERR_MESSAGE);
-                        exit(1);
-                    },
-                }
-            } continue;
-        } /* not starting with `-` -> */ out.names.push(arg); 
-    } out
-}
-
-#[tokio::main]
-async fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-
-    if args.is_empty() {
-        println!("{}\n{}", USAGE, ERR_MESSAGE);
-        exit(1);
-    }
-
-    // parse into Args
-    let args = parse_args(args);
-    if args.debug { dbg!(&args); }
-
-    // load the default config which will join anonymously
-    let config = twitch_irc::ClientConfig::default();
-    let (mut message, client) = 
-        TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(config);
-
-    // handle the actual messages
-    let join_handle = tokio::spawn(async move {
-        while let Some(msg_recv) = message.recv().await {
-            // filter chat messages only
-            if let ServerMessage::Privmsg(msg) = msg_recv {
-                if args.debug { dbg!(&msg); }
-
-                if args.ignore.contains(&msg.sender.name.as_str()) {
-                    continue;
-                }
-
-                // parse the badges to a vector
-                let badges: Vec<String> = msg.badges
-                    .iter()
-                    .map(|b| b.name.to_string())
-                    .collect();
-
-                let name_colour: Option<Colour> = {
-                    if args.colour { Some(_colour(msg.name_color)) }
-                    else if args.bcolour { Some(_bcolour(&badges)) }
-                    else { None }
-                };
-
-                let display_badges: Vec<(String, Colour)> = {
-                    if args.badge { _badge(&badges) }
-                    else if args.mbadge { _mbadge(&badges) }
-                    else if args.fbadge { _fbadge(&badges) }
-                    else { Vec::new() }
-                };
-
-
-
-                let mut message = String::new();
-                /* add current time */
-                if args.time {
-                    message.push_str(&chrono::Local::now().format("%H:%M ").to_string());
-                }
-
-                /* add origin */
-                if args.origin {
-                    message.push_str(&format!("[{}]: ", msg.channel_login));
-                }
-
-                /* add bits */
-                if args.bits && msg.bits.is_some() {
-                    message.push_str(&BITS_COLOUR.bold().paint(format!("!{}!", msg.bits.unwrap())).to_string());
-                }
-
-                /* add badges */
-                if !display_badges.is_empty() {
-                    display_badges.iter()
-                        .for_each(|(b, c)| {
-                            message.push_str(&c.bold().paint(format!("|{}|", b)).to_string());
-                        });
-                }
-
-                // add separator + little hack to make time display work
-                if !message.is_empty() && message.chars().last().unwrap() != ' ' {
-                    message.push(' '); 
-                }
-
-                /* add name */
-                if let Some(colour) = name_colour {
-                    message.push_str(&colour.bold().paint(format!("{}: ", msg.sender.name)).to_string());
-                } else {
-                    message.push_str(&format!("{}: ", msg.sender.name));
-                }
-
-                message.push_str(&msg.message_text);
-                message.push('\n'); //needed for saving to file
-
-                if !args.quiet {
-                    // print em all!
-                    print!("{}", message);
-                }
-
-                // maybe log to file too
-                if let Some(file) = args.file {
-                    let mut fd = std::fs::OpenOptions::new()
-                        .write(true).append(true).create(true)
-                        .open(file).unwrap_or_else(|e| {
-                            eprintln!("{e}");
-                            exit(1);
-                        });
-
-                    let plain_bytes = strip_ansi_escapes::strip(message.as_bytes());
-
-                    use std::io::Write;
-                    fd.write_all(&plain_bytes)
-                        .unwrap_or_else(|e| {
-                        eprintln!("{e}");
-                        exit(1);
-                    });
-                }
-            }
-        }
-    });
-
-    // join that channel's twitch chat
-    for name in args.names.into_iter() {
-        client.join(name).unwrap_or_else(|n| {
-            eprintln!("Failed to join: {n}");
-            exit(1);
-        });
-    }
-    
-    // await messages
-    if let Err(why) = join_handle.await {
-        eprintln!("msg handler Err: {}", why);
-    }
+			_ => panic!("{}\n{}", USAGE, ERR_MESSAGE),
+		})).or_else(|| {
+			out.names.push(Box::leak(arg.into_boxed_str()));
+			Some(())
+		});
+	} out
 }
 
 const BROADCASTER_COLOUR: Colour = RGB(233, 25,  22 );
@@ -271,71 +113,139 @@ const BITS_COLOUR: Colour        = RGB(193, 178, 17 );
 const DEFAULT_COLOUR: Colour     = RGB(255, 255, 255);
 const UNKNOWN_COLOUR: Colour     = RGB(200, 200, 200);
 
-use twitch_irc::message::RGBColor;
-fn _colour(colour: Option<RGBColor>) -> Colour {
-    match colour {
-        Some(c) => RGB(c.r, c.g, c.b),
-        None => Colour::White,
-    }
+async fn handle_msg(args: &Args, msg: twitch_irc::message::PrivmsgMessage) {
+	#[cfg(debug_assertions)]
+	dbg!(&msg);
+
+	if args.ignore.contains(&msg.sender.name.as_str()) { return; }
+
+	let badges: Vec<String> = msg.badges.iter()
+		.map(|b| b.name.to_string()).collect();
+
+	let badge_map = |b| match b {
+		"broadcaster" => BROADCASTER_COLOUR,
+		"moderator"   => MODERATOR_COLOUR,
+		"vip"         => VIP_COLOUR,
+		"founder"     => FOUNDER_COLOUR,
+		"subscriber"  => SUBSCRIBER_COLOUR,
+		"bits"        => BITS_COLOUR,
+		_             => UNKNOWN_COLOUR,
+	};
+
+	let name_colour =
+		if args.flags & COLOUR != 0 {
+			match msg.name_color {
+				Some(c) => RGB(c.r, c.g, c.b),
+				None    => Colour::White,
+			}.into()
+		}
+		else if args.flags & BCOLOUR != 0 {
+			match badges.as_slice() {
+				[] => DEFAULT_COLOUR,
+				_  => badge_map(&badges[0]),
+			}.into()
+		}
+		else { None };
+
+	let display_badges =
+		if args.flags & BADGE != 0 
+			{ badges.iter().map(|b| (String::from(&b[0..3]), badge_map(b))).collect() }
+		else if args.flags & MBADGE != 0 { 
+			badges.iter().map(|b| (
+					match b.as_str() {
+						"broadcaster" => "B",
+						"moderator"   => "m",
+						"vip"         => "v",
+						"founder"     => "f",
+						"subscriber"  => "s",
+						"bits"        => "b",
+						&_            => "?", }.to_string(),
+					badge_map(b)))
+				.collect()
+		}
+		else if args.flags & FBADGE != 0 
+			{ badges.iter().map(|b| (b.to_string(), badge_map(b))).collect() }
+		else { Vec::new() };
+
+
+	let mut message = String::new();
+
+	if args.flags & TIME != 0 {
+		message.push_str(&chrono::Local::now().format("%H:%M ").to_string());
+	}
+
+	if args.flags & ORIGIN != 0 {
+		message.push_str(&format!("[{}]: ", msg.channel_login));
+	}
+
+	if args.flags & BITS != 0 && msg.bits.is_some() {
+		message.push_str(&BITS_COLOUR.bold().paint(format!("!{}!", msg.bits.unwrap())).to_string());
+	}
+
+	display_badges.iter().for_each(|(b, c)|
+		message.push_str(&c.bold().paint(format!("|{b}|")).to_string()));
+
+	if !message.is_empty() && !message.ends_with(' ') {
+		message.push(' '); 
+	}
+
+	match name_colour {
+		Some(c) => message.push_str(&c.bold().paint(format!("{}: ", msg.sender.name)).to_string()),
+		None    => message.push_str(&format!("{}: ", msg.sender.name)),
+	}
+
+	message.push_str(&msg.message_text);
+	message.push('\n');
+
+	if args.flags & QUIET == 0 { print!("{message}"); }
+
+	if let Some(file) = args.file {
+		let mut file = std::fs::OpenOptions::new()
+			.append(true).create(true)
+			.open(file).unwrap();
+
+		let mut message = message.as_str();
+		let mut out = String::new();
+		while let Some(i) = message.find('\x1b') {
+			out.push_str(&message[..i]);
+			message = &message[i..];
+			message = &message[message.find('m').unwrap() + 1..];
+		}
+
+		use std::io::Write;
+		file.write_all(out.as_bytes()).unwrap();
+	};
 }
 
-fn _bcolour(badges: &[String]) -> Colour {
-    if badges.is_empty() {
-        return DEFAULT_COLOUR;
-    }
+#[tokio::main]
+async fn main() {
+	std::panic::set_hook(Box::new(|info| {
+		eprintln!("{info}");
+		exit(1);
+	}));
 
-    match badges[0].as_str() {
-        "broadcaster" => BROADCASTER_COLOUR,
-        "moderator"   => MODERATOR_COLOUR,
-        "vip"         => VIP_COLOUR,
-        "founder"     => FOUNDER_COLOUR,
-        "subscriber"  => SUBSCRIBER_COLOUR,
-        "bits"        => BITS_COLOUR,
-        &_ => UNKNOWN_COLOUR,
-    }
-}
+	let args = Arc::new(parse_args(std::env::args().skip(1)));
 
-fn _badge(badges: &[String]) -> Vec<(String, Colour)>{
-    return badges.iter()
-        .fold(Vec::new(), |mut acc, b| {
-            acc.push(match b.as_str() {
-                "broadcaster" => (String::from("brd"), BROADCASTER_COLOUR),
-                "moderator"   => (String::from("mod"), MODERATOR_COLOUR),
-                "vip"         => (String::from("vip"), VIP_COLOUR),
-                "founder"     => (String::from("fnd"), FOUNDER_COLOUR),
-                "subscriber"  => (String::from("sub"), SUBSCRIBER_COLOUR),
-                "bits"        => (String::from("bit"), BITS_COLOUR),
-                &_ => (String::from(&b[0..3]), UNKNOWN_COLOUR),
-            }); acc
-        });
-}
+	if args.names.is_empty() 
+		{ panic!("{}\n{}", USAGE, ERR_MESSAGE); }
 
-fn _mbadge(badges: &[String]) -> Vec<(String, Colour)>{
-    return badges.iter()
-        .fold(Vec::new(), |mut acc, b| {
-            acc.push(match b.as_str() {
-                "broadcaster" => (String::from("B"), BROADCASTER_COLOUR),
-                "moderator"   => (String::from("m"), MODERATOR_COLOUR),
-                "vip"         => (String::from("v"), VIP_COLOUR),
-                "founder"     => (String::from("f"), FOUNDER_COLOUR),
-                "subscriber"  => (String::from("s"), SUBSCRIBER_COLOUR),
-                "bits"        => (String::from("b"), BITS_COLOUR),
-                &_ => (String::from("?"), UNKNOWN_COLOUR),
-            }); acc
-        });
-}
+	#[cfg(debug_assertions)]
+	dbg!(&args);
 
-fn _fbadge(badges: &[String]) -> Vec<(String, Colour)>{
-    return badges.iter()
-        .fold(Vec::new(), |mut acc, b| {
-            acc.push((b.to_string(), match b.as_str() {
-                "broadcaster" => BROADCASTER_COLOUR,
-                "moderator"   => MODERATOR_COLOUR,
-                "vip"         => VIP_COLOUR,
-                "founder"     => FOUNDER_COLOUR,
-                "subscriber"  => SUBSCRIBER_COLOUR,
-                "bits"        => BITS_COLOUR,
-                &_ => UNKNOWN_COLOUR,
-            })); acc
-        });
+	let (mut message, client) = 
+		TwitchIRCClient::<SecureTCPTransport, StaticLoginCredentials>::new(
+			twitch_irc::ClientConfig::default());
+
+	let _args = Arc::clone(&args);
+	let handle = tokio::spawn(async move {
+		while let Some(msg_recv) = message.recv().await {
+			if let ServerMessage::Privmsg(msg) = msg_recv 
+				{ handle_msg(&_args, msg).await; }
+		}
+	});
+
+	args.names.iter().for_each(|name|
+		client.join(String::from(*name)).expect("Failed to join"));
+
+	handle.await.unwrap()
 }
