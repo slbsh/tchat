@@ -38,5 +38,4 @@ OPTIONS
 # Installation
 - latest stable release of the rust toolchain.  
 - openssl or libressl  
-
-then: ``make build`` or ``make install``  
+`cargo install --path .`
